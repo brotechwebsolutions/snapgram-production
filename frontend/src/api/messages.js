@@ -1,0 +1,11 @@
+import api from './axios'
+
+export const messagesApi = {
+  send:              (formData)              => api.post('/messages', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  getConversations:  ()                      => api.get('/messages/conversations'),
+  getMessages:       (convId, page, size)    => api.get(`/messages/conversations/${convId}?page=${page}&size=${size}`),
+  sendTyping:        (convId, isTyping)      => api.post(`/messages/conversations/${convId}/typing`, { isTyping }),
+  markSeen:          (messageId)             => api.post(`/messages/${messageId}/seen`),
+  deleteMessage:     (messageId)             => api.delete(`/messages/${messageId}`),
+  pinConversation:   (convId)               => api.post(`/messages/conversations/${convId}/pin`),
+}

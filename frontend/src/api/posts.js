@@ -1,0 +1,26 @@
+import api from './axios'
+
+export const postsApi = {
+  create:         (formData)          => api.post('/posts', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
+  getById:        (postId)            => api.get(`/posts/${postId}`),
+  update:         (postId, data)      => api.put(`/posts/${postId}`, data),
+  delete:         (postId)            => api.delete(`/posts/${postId}`),
+  archive:        (postId)            => api.post(`/posts/${postId}/archive`),
+  pin:            (postId)            => api.post(`/posts/${postId}/pin`),
+  like:           (postId)            => api.post(`/posts/${postId}/like`),
+  react:          (postId, emoji)     => api.post(`/posts/${postId}/react`, { emoji }),
+  save:           (postId)            => api.post(`/posts/${postId}/save`),
+  getGlobalFeed:  (page, size, sort)  => api.get(`/posts/feed/global?page=${page}&size=${size}&sort=${sort}`),
+  getFollowingFeed:(page, size)       => api.get(`/posts/feed/following?page=${page}&size=${size}`),
+  getUserPosts:   (userId, page, size)=> api.get(`/posts/user/${userId}?page=${page}&size=${size}`),
+  getSaved:       (page, size)        => api.get(`/posts/saved?page=${page}&size=${size}`),
+  getArchived:    (page, size)        => api.get(`/posts/archived?page=${page}&size=${size}`),
+  getDrafts:      ()                  => api.get('/posts/drafts'),
+  getByHashtag:   (tag, page, size)   => api.get(`/posts/hashtag/${tag}?page=${page}&size=${size}`),
+  getComments:    (postId, page, size)=> api.get(`/posts/${postId}/comments?page=${page}&size=${size}`),
+  addComment:     (postId, data)      => api.post(`/posts/${postId}/comments`, data),
+  likeComment:    (commentId)         => api.post(`/comments/${commentId}/like`),
+  deleteComment:  (commentId)         => api.delete(`/comments/${commentId}`),
+  pinComment:     (postId, commentId) => api.post(`/posts/${postId}/comments/${commentId}/pin`),
+  getReplies:     (commentId, p, s)   => api.get(`/comments/${commentId}/replies?page=${p}&size=${s}`),
+}

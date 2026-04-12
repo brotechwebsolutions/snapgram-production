@@ -1,0 +1,61 @@
+# =============================================================
+# Render Deployment Configuration
+# Place at the ROOT of your repository.
+# Docs: https://render.com/docs/render-yaml-docs
+# =============================================================
+
+services:
+  - type: web
+    name: snapgram-backend
+    runtime: java
+    region: oregon
+    plan: free              # upgrade to starter ($7/mo) to eliminate cold starts
+
+    # Build from backend/ subdirectory
+    buildCommand: "cd backend && mvn clean package -DskipTests -q"
+
+    # PORT env var is set automatically by Render — the app reads it via ${PORT:8080}
+    startCommand: "cd backend && java $JAVA_OPTS -jar target/snapgram-backend-*.jar"
+
+    # Health check path — must return 200 for Render to mark service UP
+    healthCheckPath: /actuator/health
+
+    autoDeploy: true
+
+    envVars:
+      # JVM memory tuning for free tier (512MB RAM limit)
+      # -Xmx350m: max heap 350MB, leaving ~162MB for OS + non-heap
+      # UseContainerSupport: respects container memory limits
+      - key: JAVA_OPTS
+        value: "-Xmx350m -Xms64m -XX:+UseContainerSupport -XX:MaxRAMPercentage=70.0"
+
+      # ── Set these in Render Dashboard → Environment ───────────────────────
+      # NEVER commit actual values to this file
+
+      - key: MONGODB_URI
+        sync: false          # mongodb+srv://user:pass@cluster.mongodb.net/snapgram
+
+      - key: JWT_SECRET
+        sync: false          # min 32 chars: openssl rand -base64 48
+
+      - key: GMAIL_USERNAME
+        sync: false          # your-email@gmail.com
+
+      - key: GMAIL_APP_PASSWORD
+        sync: false          # 16-char App Password (NOT your Gmail password)
+
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+      - key: FRONTEND_URL
+        sync: false          # https://your-app.vercel.app  (set AFTER Vercel deploy)
+
+      # Optional overrides (these have safe defaults in application.properties)
+      # - key: JWT_EXPIRATION
+      #   value: "86400000"
+      # - key: JWT_REFRESH_EXPIRATION
+      #   value: "604800000"
