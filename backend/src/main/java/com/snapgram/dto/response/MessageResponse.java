@@ -23,5 +23,7 @@ public class MessageResponse {
     private PostResponse  sharedPost;
     private String        status;
     private boolean       isDeleted;
+    private boolean       isEdited;
+    private LocalDateTime editedAt;
     private LocalDateTime createdAt;
 }
