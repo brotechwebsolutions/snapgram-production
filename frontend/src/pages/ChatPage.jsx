@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   Send, Image as ImageIcon, ArrowLeft,
-  MoreHorizontal, Search, CheckCheck, Check
+  MoreHorizontal, Search, CheckCheck, Check,
+  Edit3, X
 } from 'lucide-react'
 import { messagesApi }  from '../api/messages'
+import { searchApi }    from '../api/search'
 import { useAuth }      from '../context/AuthContext'
 import { useSocket }    from '../context/SocketContext'
 import Avatar           from '../components/common/Avatar'
@@ -14,6 +16,7 @@ import toast from 'react-hot-toast'
 
 export default function ChatPage() {
   const { convId }    = useParams()
+  const location      = useLocation()
   const { user }      = useAuth()
   const { subscribe } = useSocket()
   const navigate      = useNavigate()
@@ -26,6 +29,12 @@ export default function ChatPage() {
   const [loadingMsgs, setLoadingMsgs]     = useState(false)
   const [typing, setTyping]               = useState(false)
   const [searchQuery, setSearchQuery]     = useState('')
+
+  // New-message (start conversation) modal state
+  const [showNewMsg, setShowNewMsg] = useState(false)
+  const [nmQuery, setNmQuery]       = useState('')
+  const [nmResults, setNmResults]   = useState([])
+  const [nmLoading, setNmLoading]   = useState(false)
 
   const bottomRef     = useRef(null)
   const typingTimer   = useRef(null)
@@ -52,6 +61,15 @@ export default function ChatPage() {
       if (conv && conv.id !== activeConvRef.current?.id) openConversation(conv)
     }
   }, [convId, conversations])
+
+  // Open a chat automatically when navigated here via a profile's "Message" button
+  useEffect(() => {
+    const target = location.state?.startChatWith
+    if (target && !loadingConvs) {
+      startConversation(target)
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  }, [location.state, loadingConvs])
 
   // FIX: WebSocket subscriptions use refs — no stale closure issues
   useEffect(() => {
@@ -99,6 +117,62 @@ export default function ChatPage() {
     }
   }, [user?.id, subscribe])
 
+  // Debounced user search for the "New message" modal
+  useEffect(() => {
+    if (!showNewMsg) return
+    const q = nmQuery.trim()
+    if (!q) { setNmResults([]); setNmLoading(false); return }
+    setNmLoading(true)
+    const timer = setTimeout(() => {
+      searchApi.users(q, 0, 20)
+        .then(({ data }) => setNmResults(data.data?.content || []))
+        .catch(() => setNmResults([]))
+        .finally(() => setNmLoading(false))
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [nmQuery, showNewMsg])
+
+  const openNewMessage = () => {
+    setNmQuery('')
+    setNmResults([])
+    setShowNewMsg(true)
+  }
+
+  // Pick a person from the New Message modal — open their existing
+  // conversation, or start a fresh (unsaved) one if none exists yet.
+  const startConversation = (target) => {
+    setShowNewMsg(false)
+    const existing = conversations.find(c =>
+      c.participants?.some(p => p.id === target.id)
+    )
+    if (existing) {
+      openConversation(existing)
+      return
+    }
+    const draft = {
+      id: null, // no conversation exists in the DB until the first message is sent
+      participants: [user, target],
+      lastMessage: null,
+      unreadCount: 0,
+    }
+    setActiveConv(draft)
+    setMessages([])
+    navigate('/messages', { replace: true })
+  }
+
+  // After the first message in a brand-new conversation succeeds, the
+  // backend has now created the Conversation document — sync its real id
+  // into local state so subsequent sends/loads target the right thread.
+  const syncNewConversation = (conversationId) => {
+    setActiveConv(prev => (prev && !prev.id) ? { ...prev, id: conversationId } : prev)
+    setConversations(prev => {
+      if (prev.some(c => c.id === conversationId)) return prev
+      const draft = activeConvRef.current
+      return [{ ...draft, id: conversationId }, ...prev]
+    })
+    navigate(`/messages/${conversationId}`, { replace: true })
+  }
+
   const openConversation = async (conv) => {
     setActiveConv(conv)
     setLoadingMsgs(true)
@@ -143,6 +217,13 @@ export default function ChatPage() {
       })], { type: 'application/json' }))
       const { data } = await messagesApi.send(fd)
       setMessages(prev => prev.map(m => m.id === tempId ? data.data : m))
+      if (!activeConv.id && data.data?.conversationId) {
+        syncNewConversation(data.data.conversationId)
+      } else {
+        setConversations(prev => prev.map(c =>
+          c.id === activeConv.id ? { ...c, lastMessage: data.data } : c
+        ))
+      }
     } catch {
       setMessages(prev => prev.filter(m => m.id !== tempId))
       toast.error('Failed to send message')
@@ -173,6 +254,13 @@ export default function ChatPage() {
       })], { type: 'application/json' }))
       const { data } = await messagesApi.send(fd)
       setMessages(prev => [data.data, ...prev])
+      if (!activeConv.id && data.data?.conversationId) {
+        syncNewConversation(data.data.conversationId)
+      } else {
+        setConversations(prev => prev.map(c =>
+          c.id === activeConv.id ? { ...c, lastMessage: data.data } : c
+        ))
+      }
     } catch { toast.error('Failed to send image') }
     // Reset input
     if (fileRef.current) fileRef.current.value = ''
@@ -194,7 +282,16 @@ export default function ChatPage() {
 
         {/* Header */}
         <div className="p-4 border-b border-gray-200 dark:border-gray-800">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-3">Messages</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Messages</h2>
+            <button
+              onClick={openNewMessage}
+              className="p-2 text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+              title="New message"
+            >
+              <Edit3 size={19} />
+            </button>
+          </div>
           <div className="relative">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
             <input
@@ -393,6 +490,64 @@ export default function ChatPage() {
             <p className="text-gray-500 dark:text-gray-400 text-sm max-w-xs">
               Send private photos and messages to a friend or group.
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* ── New message modal ────────────────────────────────────── */}
+      {showNewMsg && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 px-4"
+          onClick={() => setShowNewMsg(false)}
+        >
+          <div
+            className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-md max-h-[75vh] flex flex-col overflow-hidden shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
+              <h3 className="font-semibold text-gray-900 dark:text-white">New message</h3>
+              <button
+                onClick={() => setShowNewMsg(false)}
+                className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-800 flex-shrink-0">
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                <input
+                  autoFocus
+                  value={nmQuery}
+                  onChange={e => setNmQuery(e.target.value)}
+                  placeholder="Search for people..."
+                  className="input-base pl-9 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {nmLoading ? (
+                <div className="text-center py-10 text-sm text-gray-400">Searching...</div>
+              ) : !nmQuery.trim() ? (
+                <div className="text-center py-10 text-sm text-gray-400 px-6">Search for people to start a conversation.</div>
+              ) : nmResults.length === 0 ? (
+                <div className="text-center py-10 text-sm text-gray-400 px-6">No people found for "{nmQuery}"</div>
+              ) : nmResults.map(u => (
+                <button
+                  key={u.id}
+                  onClick={() => startConversation(u)}
+                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors text-left"
+                >
+                  <Avatar user={u} size="md" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-gray-900 dark:text-white truncate">{u.username}</p>
+                    {u.fullName && <p className="text-xs text-gray-500 truncate">{u.fullName}</p>}
+                  </div>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
