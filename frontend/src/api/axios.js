@@ -7,7 +7,6 @@ import axios from "axios";
  * ✔ Automatically attaches JWT
  * ✔ Handles network errors cleanly
  */
-
 const envBaseUrl = import.meta.env.VITE_API_BASE_URL;
 const API_BASE_URL = envBaseUrl
   ? envBaseUrl.replace(/\/$/, "")
@@ -21,9 +20,6 @@ if (!API_BASE_URL) {
 
 const api = axios.create({
   baseURL: `${API_BASE_URL}/api`,
-  headers: {
-    "Content-Type": "application/json",
-  },
   timeout: 15000,
   withCredentials: false, // set true only if using cookies
 });
@@ -34,11 +30,9 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("accessToken");
-
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-
     return config;
   },
   (error) => Promise.reject(error)
@@ -56,30 +50,24 @@ api.interceptors.response.use(
       error.userMessage = "Unable to connect to server. Please try again.";
       return Promise.reject(error);
     }
-
     const { status, config } = error.response;
-
     // 🔐 Handle Unauthorized (except auth routes)
     if (status === 401 && !config.url?.includes("/auth/")) {
       localStorage.removeItem("accessToken");
       localStorage.removeItem("refreshToken");
       localStorage.removeItem("user");
-
       setTimeout(() => {
         window.location.href = "/login";
       }, 500);
     }
-
     // 🚫 Too many requests
     if (status === 429) {
       error.userMessage = "Too many requests. Please try again later.";
     }
-
     // 💥 Server error
     if (status >= 500) {
       error.userMessage = "Server error. Please try again.";
     }
-
     return Promise.reject(error);
   }
 );
