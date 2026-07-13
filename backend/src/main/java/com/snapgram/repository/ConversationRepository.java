@@ -14,6 +14,7 @@ public interface ConversationRepository extends MongoRepository<Conversation, St
     @Query("{ 'participantIds': { $all: [?0, ?1] }, $expr: { $eq: [ { $size: '$participantIds' }, 2 ] } }")
     Optional<Conversation> findDirectConversation(String userId1, String userId2);
 
-    @Query("{ 'participantIds': ?0, 'deletedByUserIds': { $ne: ?0 } }")
+    @Query(value = "{ 'participantIds': ?0, 'deletedByUserIds': { $ne: ?0 } }",
+           sort  = "{ 'lastMessageAt': -1 }")
     List<Conversation> findByParticipantIdOrderByLastMessageAtDesc(String userId);
 }
