@@ -198,6 +198,34 @@ public class MessageService {
         });
     }
 
+    // ── EDIT ──────────────────────────────────────────────────────────────────
+
+    public MessageResponse editMessage(String messageId, String userId, String newContent) {
+        Message msg = messageRepository.findById(messageId)
+                .orElseThrow(() -> new ResourceNotFoundException("Message", messageId));
+        if (!msg.getSenderId().equals(userId)) {
+            throw new ForbiddenException("You can only edit your own messages");
+        }
+        if (msg.isDeleted()) {
+            throw new BadRequestException("Cannot edit a deleted message");
+        }
+        if (msg.getMessageType() != Message.MessageType.TEXT) {
+            throw new BadRequestException("Only text messages can be edited");
+        }
+        if (newContent == null || newContent.trim().isEmpty()) {
+            throw new BadRequestException("Message content cannot be empty");
+        }
+
+        msg.setContent(newContent.trim());
+        msg.setEdited(true);
+        msg.setEditedAt(LocalDateTime.now());
+        Message saved = messageRepository.save(msg);
+
+        MessageResponse response = toMessageResponse(saved, userId);
+        broadcastUpdateToOthers(saved, userId, response);
+        return response;
+    }
+
     // ── DELETE ────────────────────────────────────────────────────────────────
 
     public void deleteMessage(String messageId, String userId) {
@@ -209,7 +237,25 @@ public class MessageService {
         msg.setDeleted(true);        // FIX: field "deleted", setter setDeleted()
         msg.setDeletedBy(userId);
         msg.setDeletedAt(LocalDateTime.now());
-        messageRepository.save(msg);
+        Message saved = messageRepository.save(msg);
+
+        MessageResponse response = toMessageResponse(saved, userId);
+        broadcastUpdateToOthers(saved, userId, response);
+    }
+
+    /** Pushes an edited/deleted message's new state to the other conversation participant(s)
+     *  and refreshes the conversation preview if this was the last message. */
+    private void broadcastUpdateToOthers(Message msg, String actingUserId, MessageResponse response) {
+        conversationRepository.findById(msg.getConversationId()).ifPresent(conv -> {
+            if (msg.getId().equals(conv.getLastMessageId())) {
+                conv.setLastMessageContent(buildPreview(msg));
+                conversationRepository.save(conv);
+            }
+            conv.getParticipantIds().stream()
+                    .filter(pid -> !pid.equals(actingUserId))
+                    .forEach(pid -> messagingTemplate.convertAndSendToUser(
+                            pid, "/queue/message-updated", response));
+        });
     }
 
     // ── PIN CONVERSATION ──────────────────────────────────────────────────────
@@ -272,6 +318,8 @@ public class MessageService {
                 .sharedPost(sharedPost)
                 .status(msg.getStatus().name())
                 .isDeleted(msg.isDeleted())                             // FIX: isDeleted()
+                .isEdited(msg.isEdited())
+                .editedAt(msg.getEditedAt())
                 .createdAt(msg.getCreatedAt())
                 .build();
     }
