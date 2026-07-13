@@ -3,7 +3,7 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import {
   Send, Image as ImageIcon, ArrowLeft,
   MoreHorizontal, Search, CheckCheck, Check,
-  Edit3, X
+  Edit3, X, Pencil, Trash2
 } from 'lucide-react'
 import { messagesApi }  from '../api/messages'
 import { searchApi }    from '../api/search'
@@ -29,6 +29,11 @@ export default function ChatPage() {
   const [loadingMsgs, setLoadingMsgs]     = useState(false)
   const [typing, setTyping]               = useState(false)
   const [searchQuery, setSearchQuery]     = useState('')
+
+  // Per-message action menu (delete/edit) + inline edit state
+  const [openMenuId, setOpenMenuId]       = useState(null)
+  const [editingId, setEditingId]         = useState(null)
+  const [editText, setEditText]           = useState('')
 
   // New-message (start conversation) modal state
   const [showNewMsg, setShowNewMsg] = useState(false)
@@ -111,11 +116,31 @@ export default function ChatPage() {
       }
     })
 
+    // Live sync when the other participant edits or deletes a message
+    const unsubUpdated = subscribe('/user/queue/message-updated', (msg) => {
+      const conv = activeConvRef.current
+      if (conv && msg.conversationId === conv.id) {
+        setMessages(prev => prev.map(m => m.id === msg.id ? msg : m))
+      }
+      setConversations(prev => prev.map(c =>
+        c.lastMessage?.id === msg.id ? { ...c, lastMessage: msg } : c
+      ))
+    })
+
     return () => {
       unsubMsg()
       unsubTyping()
+      unsubUpdated()
     }
   }, [user?.id, subscribe])
+
+  // Close the open message action menu on any outside click
+  useEffect(() => {
+    if (!openMenuId) return
+    const closeMenu = () => setOpenMenuId(null)
+    document.addEventListener('click', closeMenu)
+    return () => document.removeEventListener('click', closeMenu)
+  }, [openMenuId])
 
   // Debounced user search for the "New message" modal
   useEffect(() => {
@@ -266,6 +291,57 @@ export default function ChatPage() {
     if (fileRef.current) fileRef.current.value = ''
   }
 
+  const handleDeleteMessage = async (messageId) => {
+    setOpenMenuId(null)
+    const prevMessages = messages
+    setMessages(prev => prev.map(m =>
+      m.id === messageId ? { ...m, isDeleted: true, content: null, mediaUrl: null } : m
+    ))
+    try {
+      await messagesApi.deleteMessage(messageId)
+      setConversations(prev => prev.map(c =>
+        c.lastMessage?.id === messageId
+          ? { ...c, lastMessage: { ...c.lastMessage, isDeleted: true } }
+          : c
+      ))
+    } catch {
+      setMessages(prevMessages)
+      toast.error('Failed to delete message')
+    }
+  }
+
+  const startEditMessage = (msg) => {
+    setOpenMenuId(null)
+    setEditingId(msg.id)
+    setEditText(msg.content || '')
+  }
+
+  const cancelEditMessage = () => {
+    setEditingId(null)
+    setEditText('')
+  }
+
+  const saveEditMessage = async (messageId) => {
+    const trimmed = editText.trim()
+    if (!trimmed) { toast.error('Message cannot be empty'); return }
+    const prevMessages = messages
+    setMessages(prev => prev.map(m =>
+      m.id === messageId ? { ...m, content: trimmed, isEdited: true } : m
+    ))
+    setEditingId(null)
+    setEditText('')
+    try {
+      const { data } = await messagesApi.editMessage(messageId, trimmed)
+      setMessages(prev => prev.map(m => m.id === messageId ? data.data : m))
+      setConversations(prev => prev.map(c =>
+        c.lastMessage?.id === messageId ? { ...c, lastMessage: data.data } : c
+      ))
+    } catch {
+      setMessages(prevMessages)
+      toast.error('Failed to edit message')
+    }
+  }
+
   const filteredConvs = conversations.filter(conv => {
     if (!searchQuery.trim()) return true
     const other = conv.participants?.find(p => p.id !== user?.id)
@@ -406,24 +482,86 @@ export default function ChatPage() {
               </div>
             ) : messages.map((msg) => {
               const isMine = msg.sender?.id === user?.id || msg.senderId === user?.id
+              const isEditingThis = editingId === msg.id
+              const canModify = isMine && !msg.isDeleted && !String(msg.id).startsWith('temp-')
               return (
-                <div key={msg.id} className={`flex items-end gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
+                <div key={msg.id} className={`group flex items-end gap-2 ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
                   {!isMine && <Avatar user={msg.sender} size="xs" className="flex-shrink-0 mb-0.5" />}
-                  <div className={`max-w-[82%] sm:max-w-[72%] ${isMine ? 'message-bubble-sent' : 'message-bubble-received'}`}>
-                    {msg.isDeleted ? (
-                      <p className="text-xs italic opacity-60">Message deleted</p>
-                    ) : msg.messageType === 'IMAGE' ? (
-                      <img src={msg.mediaUrl} alt="Shared image" className="rounded-lg max-w-xs max-h-64 object-cover" loading="lazy" />
-                    ) : (
-                      <p className="text-sm leading-relaxed break-words">{msg.content}</p>
+                  <div className="relative flex items-center gap-1">
+                    {/* Hover action menu — own, non-deleted messages only */}
+                    {canModify && !isEditingThis && (
+                      <div className={`relative flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity ${isMine ? 'order-first' : 'order-last'}`}>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setOpenMenuId(openMenuId === msg.id ? null : msg.id) }}
+                          className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full"
+                        >
+                          <MoreHorizontal size={16} />
+                        </button>
+                        {openMenuId === msg.id && (
+                          <div
+                            className={`absolute z-10 top-7 ${isMine ? 'right-0' : 'left-0'} bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 min-w-[110px]`}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {msg.messageType === 'TEXT' && (
+                              <button
+                                type="button"
+                                onClick={() => startEditMessage(msg)}
+                                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700"
+                              >
+                                <Pencil size={13} /> Edit
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteMessage(msg.id)}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-red-500 hover:bg-gray-50 dark:hover:bg-gray-700"
+                            >
+                              <Trash2 size={13} /> Delete
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     )}
-                    <div className={`flex items-center gap-1 mt-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
-                      <span className="text-[10px] opacity-50 select-none">{formatMessageTime(msg.createdAt)}</span>
-                      {isMine && (
-                        msg.status === 'SEEN'
-                          ? <CheckCheck size={11} className="text-blue-300 opacity-80" />
-                          : <Check size={11} className="opacity-40" />
+
+                    <div className={`max-w-[82%] sm:max-w-[72%] ${isMine ? 'message-bubble-sent' : 'message-bubble-received'}`}>
+                      {msg.isDeleted ? (
+                        <p className="text-xs italic opacity-60">Message deleted</p>
+                      ) : isEditingThis ? (
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            autoFocus
+                            value={editText}
+                            onChange={e => setEditText(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') { e.preventDefault(); saveEditMessage(msg.id) }
+                              if (e.key === 'Escape') cancelEditMessage()
+                            }}
+                            className="bg-transparent text-sm outline-none border-b border-current/30 flex-1 min-w-[100px]"
+                          />
+                          <button type="button" onClick={() => saveEditMessage(msg.id)} className="p-0.5 opacity-80 hover:opacity-100 flex-shrink-0">
+                            <Check size={14} />
+                          </button>
+                          <button type="button" onClick={cancelEditMessage} className="p-0.5 opacity-80 hover:opacity-100 flex-shrink-0">
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : msg.messageType === 'IMAGE' ? (
+                        <img src={msg.mediaUrl} alt="Shared image" className="rounded-lg max-w-xs max-h-64 object-cover" loading="lazy" />
+                      ) : (
+                        <p className="text-sm leading-relaxed break-words">{msg.content}</p>
                       )}
+                      <div className={`flex items-center gap-1 mt-1 ${isMine ? 'justify-end' : 'justify-start'}`}>
+                        <span className="text-[10px] opacity-50 select-none">{formatMessageTime(msg.createdAt)}</span>
+                        {msg.isEdited && !msg.isDeleted && !isEditingThis && (
+                          <span className="text-[10px] opacity-50 select-none">· edited</span>
+                        )}
+                        {isMine && (
+                          msg.status === 'SEEN'
+                            ? <CheckCheck size={11} className="text-blue-300 opacity-80" />
+                            : <Check size={11} className="opacity-40" />
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
