@@ -65,6 +65,15 @@ public class MessageController {
         return ResponseEntity.ok(ApiResponse.success(null));
     }
 
+    @PutMapping("/{messageId}")
+    public ResponseEntity<ApiResponse<MessageResponse>> editMessage(
+            @PathVariable String messageId,
+            @AuthenticationPrincipal UserDetailsImpl userDetails,
+            @RequestBody Map<String, String> body) {
+        return ResponseEntity.ok(ApiResponse.success("Message updated",
+                messageService.editMessage(messageId, userDetails.getId(), body.get("content"))));
+    }
+
     @DeleteMapping("/{messageId}")
     public ResponseEntity<ApiResponse<Void>> deleteMessage(
             @PathVariable String messageId,
