@@ -1,6 +1,7 @@
 package com.snapgram.service;
 
 import com.cloudinary.Cloudinary;
+import com.cloudinary.Transformation;
 import com.cloudinary.utils.ObjectUtils;
 import com.snapgram.exception.BadRequestException;
 import lombok.RequiredArgsConstructor;
@@ -122,8 +123,10 @@ public class CloudinaryService {
             options.put("resource_type", resourceType);
             options.put("quality",       "auto");
             options.put("fetch_format",  "auto");
-            if (transformation != null) {
-                options.put("transformation", List.of(transformation));
+            if (transformation != null && !transformation.isEmpty()) {
+                Transformation<?> t = new Transformation<>();
+                transformation.forEach(t::param);
+                options.put("transformation", t);
             }
             options.putAll(extra);
 
