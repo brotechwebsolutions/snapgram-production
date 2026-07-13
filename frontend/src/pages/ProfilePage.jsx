@@ -176,9 +176,12 @@ export default function ProfilePage() {
                     : <span className="flex items-center gap-1"><UserPlus size={16} /> Follow</span>
                   }
                 </button>
-                <Link to="/messages" className="btn-secondary py-2 px-3 text-sm">
+                <button
+                  onClick={() => navigate('/messages', { state: { startChatWith: profile } })}
+                  className="btn-secondary py-2 px-3 text-sm"
+                >
                   <MessageCircle size={16} />
-                </Link>
+                </button>
                 <div className="relative">
                   <button onClick={() => setShowMenu(!showMenu)} className="btn-secondary py-2 px-3 text-sm">
                     <MoreHorizontal size={16} />
