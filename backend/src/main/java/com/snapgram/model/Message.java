@@ -52,6 +52,10 @@ public class Message {
     private String deletedBy;
     private LocalDateTime deletedAt;
 
+    @Builder.Default
+    private boolean edited = false;
+    private LocalDateTime editedAt;
+
     @CreatedDate
     private LocalDateTime createdAt;
 
